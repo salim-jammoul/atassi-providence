@@ -211,6 +211,7 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 								}
 							}
 							if($is_set) {
+								$pt['options']['locale'] = $locale;
 								$values[] = [
 									'locale' => $locale,
 									'value' => $sresult->get($f, array_merge(['convertCodesToIdno' => true, 'checkAccess' => $check_access], $pt['options'])),
