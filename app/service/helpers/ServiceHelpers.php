@@ -149,14 +149,15 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 				if(!$is_template && (!is_array($d) || (sizeof($d) === 0))) { continue; }
 		
 				if($is_template) {
+					$subParts = explode(':', $f);
 					$row[] = [
-							'name' => $f, 
+							'name' => $subParts[0], 
 							'code' => $f,
 							'locale' => null,
 							'dataType' => "Text",
 							'values' => [
 								[
-									'value' => $sresult->getWithTemplate($f, ['checkAccess' => $check_access, 'primaryIDs' => caGetOption('primaryIDs', $options, null)]),
+									'value' => $sresult->getWithTemplate($subParts[1], ['checkAccess' => $check_access, 'primaryIDs' => caGetOption('primaryIDs', $options, null)]),
 									'locale' => null,
 									'subvalues' => null,
 									'id' => null,
