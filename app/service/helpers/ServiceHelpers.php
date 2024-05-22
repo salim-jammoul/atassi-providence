@@ -78,7 +78,7 @@ function extractBundleNames($rec, array $args) : array {
  *
  * @return array
  */
-function fetchDataForBundles($sresult, array $bundles, array $options=null) : array {
+function fetchDataForBundles($sresult, array $bundles, array $options=null,$latestCount=0) : array {
 	$start = caGetOption('start', $options, 0, ['castTo' => 'int']);
 	$limit = caGetOption('limit', $options, null, ['castTo' => 'int']);
 	
@@ -101,10 +101,12 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 		
 		$rec = \Datamodel::getInstance($table, true);
 		$result_count = $sresult->numHits();
-		
-		if(($start > 0) && ($start < $result_count)) {
+		if($latestCount > 0) {
+			$sresult->seek($result_count - $latestCount);
+		}
+		elseif(($start > 0) && ($start < $result_count)) {
 			$sresult->seek($start);
-		} elseif(($start !== 0) && (($start >= $result_count) || ($start < 0))) {
+		}elseif(($start !== 0) && (($start >= $result_count) || ($start < 0))) {
 			// out of bounds; return empty set
 			return [];
 		}
