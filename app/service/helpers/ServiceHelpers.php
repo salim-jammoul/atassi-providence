@@ -151,7 +151,7 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null,$late
 				if(!$is_template && (!is_array($d) || (sizeof($d) === 0))) { continue; }
 		
 				if($is_template) {
-					$subParts = explode(':', $f);
+					$subParts = explode(':', $f, 2);
 					$row[] = [
 							'name' => $subParts[0], 
 							'code' => $f,
