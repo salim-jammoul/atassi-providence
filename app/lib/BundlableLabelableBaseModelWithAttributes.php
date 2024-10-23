@@ -154,7 +154,6 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 
 			$this->opo_app_plugin_manager->hookBeforeBundleInsert(array('id' => null, 'table_num' => $this->tableNum(), 'table_name' => $table, 'instance' => $this));
 
-
 			if (!$this->inTransaction()) {
 				$this->setTransaction(new Transaction($this->getDb()));
 				$vb_we_set_transaction = true;
@@ -314,6 +313,9 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 	# ------------------------------------------------------
 	/**
 	 * Override update() to generate sortable version of user-defined identifier field
+	 *
+	 * @param array $pa_options Options include:
+	 *		bulkMode = don't abort transaction on error [Default is false]
 	 */ 
 	public function update($pa_options=null) {
 		global $AUTH_CURRENT_USER_ID;
@@ -323,11 +325,13 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 				return false;
 			}
 		}
+		
+		$bulk = caGetOption('bulkMode', $pa_options, false);
 
 		$this->opo_app_plugin_manager->hookBeforeBundleUpdate(array('id' => $this->getPrimaryKey(), 'table_num' => $this->tableNum(), 'table_name' => $this->tableName(), 'instance' => $this));
 
 		$vb_we_set_transaction = false;
-		if (!$this->inTransaction()) {
+		if (!$bulk && !$this->inTransaction()) {
 			$this->setTransaction(new Transaction($this->getDb()));
 			$vb_we_set_transaction = true;
 		}
@@ -1473,6 +1477,11 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 				    case 'ca_site_page_media':
 				        return parent::getBundleFormValues($ps_bundle_name, $ps_placement_code, $pa_bundle_settings, $pa_options);
 				        break;
+				    case 'ca_storage_locations_current_contents':		// objects in storage location via ca_objects_x_storage_locations or ca_movements_x_objects
+					case 'history_tracking_current_contents':
+						$values = $this->getHistoryTrackingCurrentContentsValues($pa_options['request'], caGetOption('policy', $pa_bundle_settings, null), $pa_bundle_settings);
+						return $values['initialValues'] ?? [];
+						break;
 				}
 				break;
 			# -------------------------------------------------
@@ -3084,7 +3093,7 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 			while($qr->nextHit()) {
 				$items[$id = $qr->getPrimaryKey()] = [
 					'id' => $id,
-					'label' => $qr->get('preferred_labels'),
+					'label' => isset($pa_bundle_settings['itemDisplayTemplate']) ? $qr->getWithTemplate($pa_bundle_settings['itemDisplayTemplate']) : $qr->get('preferred_labels'),
 					'idno' => $qr->get('idno'),
 					'media' => $qr->get('ca_object_representations.media.preview170'),		// TODO: configrable media versions
 					'url' => $g_request ? caEditorUrl($g_request, $table, $id, false, [], ['actionExtra' => $g_request->getActionExtra()]) : null,
@@ -3387,7 +3396,7 @@ class BundlableLabelableBaseModelWithAttributes extends LabelableBaseModelWithAt
 			
 			if ($vb_is_many_many) {
 				$va_ids = caExtractArrayValuesFromArrayOfArrays($va_items, 'relation_id');
-				$qr_rel_items = $t_item->makeSearchResult($t_item_rel->tableNum(), $va_ids, ['sort' => $sort, 'sortDirection' => $sort_direction]);
+				$qr_rel_items = $t_item->makeSearchResult($t_item_rel->tableNum(), $va_ids, ['sort' => $sort, 'sortDirection' => $sort_direction, 'primaryTable' => $ps_related_table]);
 			} else {
 				$va_ids = caExtractArrayValuesFromArrayOfArrays($va_items, $t_rel->primaryKey());
 				$qr_rel_items = $t_item->makeSearchResult($t_rel->tableNum(), $va_ids, ['sort' => $sort, 'sortDirection' => $sort_direction]);
@@ -4870,11 +4879,21 @@ if (!$vb_batch) {
                                     if (($vs_key !== 'empty') && !$vs_path) { continue; }
                             
                                     $vn_rep_type_id = $po_request->getParameter([$vs_prefix_stub.'rep_type_id_new_'.$va_matches[1], $vs_prefix_stub.'type_id_new_'.$va_matches[1]], pInteger);
-                                    if(!$vn_rep_type_id && !($vn_rep_type_id = caGetDefaultItemID('object_representation_types'))) {
-                                        $t_list = new ca_lists();
-                                        if (is_array($va_rep_type_ids = $t_list->getItemsForList('object_representation_types', array('idsOnly' => true, 'enabledOnly' => true)))) {
-                                            $vn_rep_type_id = array_shift($va_rep_type_ids);
-                                        }
+                                    
+                                    // Set default representation type when none is explicitly set
+                                    $conf_restrict_to_types = array_filter(caGetOption(['restrict_to_types', 'restrictToTypes'], $va_bundle_settings, []) ?? [], 'strlen');
+                                    if(!$vn_rep_type_id) {
+                                    	if(!($vn_rep_type_id = caGetDefaultItemID('object_representation_types'))) {
+											$t_list = new ca_lists();
+											if (is_array($va_rep_type_ids = $t_list->getItemsForList('object_representation_types', array('idsOnly' => true, 'enabledOnly' => true)))) {
+												$vn_rep_type_id = array_shift($va_rep_type_ids);
+											}
+										}
+										// Default to first type in type restriction if default type is not in restriction for current bundle
+										// https://github.com/collectiveaccess/providence/issues/1591
+										if(is_array($conf_restrict_to_types) && sizeof($conf_restrict_to_types) && !in_array($vn_rep_type_id, $conf_restrict_to_types, true)) {
+											$vn_rep_type_id = array_shift($conf_restrict_to_types);
+										}
                                     }
                         
                                     if (is_array($pa_options['existingRepresentationMap'] ?? null) && isset($pa_options['existingRepresentationMap'][$vs_path]) && $pa_options['existingRepresentationMap'][$vs_path]) {
@@ -7577,7 +7596,9 @@ $pa_options["display_form_field_tips"] = true;
 	 *		sortDirection = direction to sort results by, either 'asc' for ascending order or 'desc' for descending order; default is 'asc'
 	 *		instance = An instance of the model for $pm_rel_table_name_or_num; if passed makeSearchResult can use it to directly extract model information potentially saving time [Default is null]
 	 *		returnIndex = Return array with result instance (key "result") and list of sorted primary key values (key "index"). [Default is false]
-	 *
+	 *		primaryTable = When search result is for a relationship, the related table to consider as context. Paths to related tables will be generated as if they were relative to the primary. Mostly useful when sorting on related records from a relationship, to ensure that the path to the sort record is. [Default is null]
+	 *		start = Zero-based index to begin returned items at. [Default is 0]
+ 	 *		limit = Maximum number of items to return. [Default is null; no limit]
 	 * @return SearchResult A search result of for the specified table
 	 */
 	public function makeSearchResult($pm_rel_table_name_or_num, $pa_ids, $pa_options=null) {
@@ -7598,7 +7619,14 @@ $pa_options["display_form_field_tips"] = true;
 			
 			$vo_sort = new BaseFindEngine($this->getDb());
 			$va_ids = $vo_sort->sortHits($va_ids, $t_instance->tableName(), join(';', $pa_sort), caGetOption('sortDirection', $pa_options, 'asc'), $pa_options);
+		} else {
+			$start = caGetOption('start', $pa_options, 0);
+			$limit = caGetOption('limit', $pa_options, null);
+			if(($start > 0) || ($limit > 0)) {
+				$va_ids = array_slice($va_ids, $start, $limit);
+			}
 		}
+		
 		if (!($vs_search_result_class = $t_instance->getProperty('SEARCH_RESULT_CLASSNAME'))) { return null; }
 		$o_data = new WLPlugSearchEngineCachedResult($va_ids, [], $t_instance->tableNum());
 		/** @var BaseSearchResult $o_res */
@@ -8757,7 +8785,11 @@ side. For many self-relations the direction determines the nature and display te
 				$va_row = array($va_rule['bundle_name'] => $vs_val = $this->get($va_rule['bundle_name']));
 				foreach($va_expression_tags as $vs_tag) {
 					$t = caParseTagOptions($vs_tag);
-					$va_row[$vs_tag] = $this->get($t['tag'], $t['options']);
+					$opts = $t['options'] ?? [];
+					if(!isset($opts['convertCodesToIdno']) && !isset($opts['convertCodesToIdno'])) {
+						$opts['convertCodesToIdno'] = true;
+					}
+					$va_row[$vs_tag] = $this->get($t['tag'], $opts);
 				}
 			}
 			
@@ -8765,7 +8797,6 @@ side. For many self-relations the direction determines the nature and display te
 			if ($t_found = ca_metadata_dictionary_rule_violations::find(array('rule_id' => $va_rule['rule_id'], 'row_id' => $this->getPrimaryKey(), 'table_num' => $this->tableNum()), array('returnAs' => 'firstModelInstance', 'transaction' => $this->getTransaction()))) {
 				$t_violation = $t_found;
 			}
-					
 			if (!$vb_skip && ExpressionParser::evaluate(html_entity_decode($va_rule['expression']), $va_row)) {
 				// violation
 				if ($t_violation->getPrimaryKey()) {
@@ -9093,6 +9124,7 @@ side. For many self-relations the direction determines the nature and display te
 							case 'base':
 								// Always use label from base, if set for the locale
 								foreach(reset($base) as $blabel) {
+									$blabel = array_shift($blabel);
 									if(($label['locale_id'] ?? null) == ($blabel['locale_id'] ?? null)) {
 										$use_label_by_locale_id[$locale_id] = array_filter($blabel, function($k) use ($label_fields) { return in_array($k, $label_fields); }, ARRAY_FILTER_USE_KEY);
 										break(2);

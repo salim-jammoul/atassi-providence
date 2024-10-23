@@ -7,7 +7,7 @@
  * ----------------------------------------------------------------------
  *
  * Software by Whirl-i-Gig (http://www.whirl-i-gig.com)
- * Copyright 2010-2023 Whirl-i-Gig
+ * Copyright 2010-2024 Whirl-i-Gig
  *
  * For more information visit http://www.CollectiveAccess.org
  *
@@ -504,7 +504,7 @@ class ca_bundle_displays extends BundlableLabelableBaseModelWithAttributes {
 		
 		if ($qr_res->numRows() > 0) {
 			$vs_subject_table = Datamodel::getTableName($this->get('table_num'));
-			$t_subject = Datamodel::getInstanceByTableNum($this->get('table_num'), true);
+			if(!$t_subject = Datamodel::getInstanceByTableNum($this->get('table_num'), true)) { return []; }
 			$t_placement = new ca_bundle_display_placements();
 			if ($this->inTransaction()) { $t_placement->setTransaction($this->getTransaction()); }
 			
@@ -579,9 +579,8 @@ if (!$pb_omit_editing_info) {
 									$placements[$placement_id]['allowInlineEditing'] = $vb_user_can_edit;
 								}
 							}
-
 							switch($t_subject->getFieldInfo($va_bundle_name[1], 'DISPLAY_TYPE')) {
-								case 'DT_SELECT':
+								case DT_SELECT:
 									if ($vs_list_code = $t_subject->getFieldInfo($va_bundle_name[1], 'LIST')) {
 										$vb_use_item_values = true;
 									} else {
@@ -981,7 +980,7 @@ if (!$pb_omit_editing_info) {
 		if (!$pm_table_name_or_num) { return null; }
 		$cache_key = caMakeCacheKeyFromOptions($options ?? [], $pm_table_name_or_num.'|'.(($g_request && $g_request->user) ? 'USER:'.$g_request->user->getPrimaryKey() : ''));
 		if(CompositeCache::contains($cache_key)) {
-			return CompositeCache::fetch($cache_key);
+			//return CompositeCache::fetch($cache_key);
 		}
 		
 		$t_subject = Datamodel::getInstance($pm_table_name_or_num, true);
@@ -1446,7 +1445,7 @@ if (!$pb_omit_editing_info) {
 					'default' => '',
 					'label' => _t('Display format'),
 					'description' => _t('Template used to format output.')
-				),
+				),		
 				'policy' => array(
 					'formatType' => FT_TEXT,
 					'displayType' => DT_SELECT,
@@ -1509,6 +1508,15 @@ if (!$pb_omit_editing_info) {
 					'default' => '',
 					'label' => _t('Display format'),
 					'description' => _t('Template used to format output.')
+				),			
+				'delimiter' => array(
+					'formatType' => FT_TEXT,
+					'displayType' => DT_FIELD,
+					'width' => 35, 'height' => 1,
+					'takesLocale' => false,
+					'default' => '; ',
+					'label' => _t('Delimiter'),
+					'description' => _t('Text to place in-between repeating values.')
 				),
 				'policy' => array(
 					'formatType' => FT_TEXT,
@@ -1518,8 +1526,35 @@ if (!$pb_omit_editing_info) {
 					'useHistoryTrackingReferringPolicyList' => true,
 					'label' => _t('Use history tracking policy'),
 					'description' => ''
-				)
+				),
+				'sortDirection' => array(
+					'formatType' => FT_TEXT,
+					'displayType' => DT_SELECT,
+					'width' => "200px", 'height' => "1",
+					'takesLocale' => false,
+					'default' => 'ASC',
+					'options' => array(
+						_t('Ascending') => 'ASC',
+						_t('Descending') => 'DESC'
+					),
+					'label' => _t('Initial sort direction'),
+					'description' => _t('Direction of sort, when sort is specified.')
+				),
 			);
+			$policy_tables = ca_objects::getHistoryTrackingCurrentValuePolicyTargets();								
+			foreach($policy_tables as $t) {
+				$tl = Datamodel::getTableProperty($t, 'NAME_SINGULAR');
+				$va_additional_settings["sort_{$t}"] = [
+					'formatType' => FT_TEXT,
+					'displayType' => DT_SELECT,
+					'width' => "475px", 'height' => 1,
+					'takesLocale' => false,
+					'default' => '',
+					'label' => _t('Initially sort %1 policies using', $tl),
+					'showSortableBundlesFor' => ['table' => $t],
+					'description' => _t('Default sort for %1 policies.', $tl)
+				];
+			}
 			$t_placement = new ca_bundle_display_placements(null, null, $va_additional_settings);
 			if ($this->inTransaction()) { $t_placement->setTransaction($this->getTransaction()); }
 			
@@ -2336,6 +2371,7 @@ if (!$pb_omit_editing_info) {
 					$va_bundle_bits_proc[] = $t_instance->primaryKey();
 				}
 				
+				$element_code = $va_bundle_bits[sizeof($va_bundle_bits)-1];
 				if ($vb_is_related) {
 					$vs_restrict_to_types = (is_array($options['restrictToTypes']) && sizeof($options['restrictToTypes'])) ? "restrictToTypes=\"".join("|", $options['restrictToTypes'])."\"" : "";
 					$vs_restrict_to_relationship_types = (is_array($options['restrictToRelationshipTypes']) && sizeof($options['restrictToRelationshipTypes'])) ? "restrictToRelationshipTypes=\"".join("|", $options['restrictToRelationshipTypes'])."\"" : "";
@@ -2388,18 +2424,30 @@ if (!$pb_omit_editing_info) {
 								break;
 						}
 					}
+				} elseif(($element_code === 'history_tracking_current_contents') && ($policy = $va_settings['policy'] ?? null) && ($policy_info = ca_objects::getHistoryTrackingCurrentValuePolicy($policy))) {
+					// resolve template relative to target of history tracking policy
+					if($target = $policy_info['table'] ?? null) {
+						$t_instance = is_a($po_result, 'SearchResult') ? $po_result->getInstance() : $po_result;
+						
+						if ($ids = $t_instance->getContents($policy, ['idsOnly' => true])) {
+							$values = caProcessTemplateForIDs($vs_template, $target, $ids, ['returnAsArray' => true, 'sort' => $va_settings["sort_{$target}"] ?? null, 'sortDirection' => $va_settings["sortDirection"] ?? null]);
+							$vs_val = join($options['delimiter'] ?? "; ", $values);
+						}
+					}
 				} else {
 					// resolve template relative to current record
 					$rtc = null;
-					$element_code = $va_bundle_bits[sizeof($va_bundle_bits)-1];
-					if($element_code !== '_generic_bundle_') {
+					if(!in_array($element_code, ['_generic_bundle_', 'history_tracking_current_value'], true)) {
+						// Set container context for all bundles except generic and current value bundles
+						// We skip current value bundles because some extant templates pull in data outside of the current value
+						// container for display, and as current value never repeats the utility of setting context here is limited
 						$dt = ca_metadata_elements::getElementDatatype($element_code);
 						$rtc = ($dt === 0) ? $vs_bundle_name : null;
 					}
 					$vs_val = $po_result->getWithTemplate($vs_template, [
 							'relativeToContainer' => $rtc, 
 							'filters'=> $options['filters'] ?? null, 
-							'delimiter' => $options['delimiter'] ?? null, 
+							'delimiter' => $options['delimiter'] ?? "; ", 
 							'policy' => $va_settings['policy'] ?? null
 						]		// passed for history tracking current value
 					);
@@ -2414,6 +2462,10 @@ if (!$pb_omit_editing_info) {
 			// policy passed for history tracking current value
 			// returnTagWithPath passed to force absolute file path to be used when running reports – some systems cannot handle urls in PDFs due to DNS configuration
 			$vs_val = $po_result->get(join(".", $va_bundle_bits), array_merge(['doRefSubstitution' => true], $options, ['policy' => $va_settings['policy'] ?? null, 'returnTagWithPath' => $options['forReport']]));	
+		}
+		
+		if($options['forReport']) {
+			$vs_val = strip_tags($vs_val, $this->getAppConfig()->get('report_allowed_text_tags') ?? []);
 		}
 		
 		if (isset($options['purify']) && $options['purify']) {
@@ -2557,7 +2609,6 @@ if (!$pb_omit_editing_info) {
 	public function savePlacementsFromHTMLForm($request, $ps_form_prefix, $ps_placement_code) {;
 		if ($vs_bundles = $request->getParameter("{$ps_placement_code}{$ps_form_prefix}displayBundleList", pString)) {
 			$va_bundles = explode(';', $vs_bundles);
-			
 			$t_display = new ca_bundle_displays($this->getPrimaryKey());
 			if ($this->inTransaction()) { $t_display->setTransaction($this->getTransaction()); }
 			$placements = $t_display->getPlacements(array('user_id' => $request->getUserID()));
@@ -2603,7 +2654,7 @@ if (!$pb_omit_editing_info) {
 					}
 				}
 				
-				if($placement_id === 0) {
+				if(((int)$placement_id === 0)) {
 					$t_display->addPlacement($vs_bundle, $va_settings[$placement_id] ?? null, $i + 1, array('user_id' => $request->getUserID(), 'additional_settings' => $va_available_bundles[$vs_bundle]['settings'] ?? []));
 					if ($t_display->numErrors()) {
 						$this->errors = $t_display->errors;
@@ -2612,7 +2663,6 @@ if (!$pb_omit_editing_info) {
 				} else {
 					$t_placement = new ca_bundle_display_placements($placement_id, null, $va_available_bundles[$vs_bundle]['settings']);
 					if ($this->inTransaction()) { $t_placement->setTransaction($this->getTransaction()); }
-					$t_placement->setMode(ACCESS_WRITE);
 					$t_placement->set('rank', $i + 1);
 					
 					if (is_array($va_settings[$placement_id] ?? null)) {

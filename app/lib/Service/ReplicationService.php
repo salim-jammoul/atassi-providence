@@ -114,12 +114,16 @@ class ReplicationService {
 	 */
 	public static function getLog($po_request) {
 		$o_replication_conf = Configuration::load(__CA_CONF_DIR__.'/replication.conf');
+		$max_media_size = $o_replication_conf->get('maximum_media_size');
+		$max_media_size_in_bytes = $max_media_size ? caParseHumanFilesize($max_media_size) : null;
 
 		$pn_from = $po_request->getParameter('from', pInteger);
 		if(!$pn_from) { $pn_from = 0; }
 
 		$pn_limit = $po_request->getParameter('limit', pInteger);
 		if(!$pn_limit) { $pn_limit = null; }
+		
+		$is_push_missing = $po_request->getParameter('push_missing', pInteger);
 		
 		if(($max_retries = (int)$o_replication_conf->get('max_media_upload_retries')) < 0) {
 			$max_retries = 5;
@@ -181,7 +185,7 @@ class ReplicationService {
 
 			$va_media = [];
 			// passing a 4th param here changes the behavior slightly
-			$va_log = ca_change_log::getLog($pn_from, $pn_limit, array_merge($pa_options, ['telescope' => $telescope, 'forceValuesForAllAttributeSLots' => true]), $va_media);
+			$va_log = ca_change_log::getLog($pn_from, $pn_limit, array_merge($pa_options, ['push_missing' => $is_push_missing, 'telescope' => $telescope, 'forceValuesForAllAttributeSLots' => true]), $va_media);
 
 			if(sizeof($va_media) > 0) {
 				$va_push_list = [];
@@ -194,8 +198,11 @@ class ReplicationService {
 					$vs_local_path = __CA_BASE_DIR__ . str_replace(__CA_URL_ROOT__, '', $vs_path_from_url);
 					if (!file_exists(realpath($vs_local_path))) { continue; }
 					
-					ReplicationService::$s_logger->log("Push media {$vs_url}::{$vs_md5} [".caHumanFilesize($vn_filesize = @filesize($vs_local_path))."]");
-					if ($vn_filesize > (1024 * 1024 * 750)) { continue; } // bail if file > 750megs
+					ReplicationService::$s_logger->log("Push media {$vs_url}::{$vs_md5} [".caHumanFilesize($filesize = @filesize($vs_local_path))."]");
+					
+					// Skip media that exceeds maximum media sync filesize
+					if (($max_media_size_in_bytes > 0) && ($filesize > $max_media_size_in_bytes)) { continue; } 
+					
 					// send media to remote service endpoint
 					$o_curl = curl_init($va_target_conf['url'] . '/service.php/replication/pushMedia');
 					$o_file = new CURLFile(realpath($vs_local_path));
@@ -249,7 +256,7 @@ class ReplicationService {
 				}
 			}
 		} else {
-			$va_log = ca_change_log::getLog($pn_from, $pn_limit, array_merge($pa_options, ['telescope' => $telescope, 'forceValuesForAllAttributeSLots' => true]));
+			$va_log = ca_change_log::getLog($pn_from, $pn_limit, array_merge($pa_options, ['push_missing' => $is_push_missing, 'telescope' => $telescope, 'forceValuesForAllAttributeSLots' => true]));
 		}
 
         foreach($va_log as $i => $l) {
@@ -617,7 +624,7 @@ class ReplicationService {
 		$has_deleted = $t->hasField('deleted');
 		
 		$db = new Db();
-		if($t->hasField('access')) {
+		if($t->hasField('access') && !is_a($t, 'BaseLabel')) {
 			$qr = $db->query("
 				SELECT g.guid 
 				FROM ca_guids g

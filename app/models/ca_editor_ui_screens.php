@@ -258,7 +258,8 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 	 * @param int $pn_rank Optional value that determines sort order of bundles in the screen. If omitted, placement is added to the end of the screen.
 	 * @param array $pa_options Optional array of options. Supports the following options:
 	 * 		user_id = if specified then add will fail if specified user does not have edit access for the display
-	 * @return int Returns placement_id of newly created placement on success, false on error
+	 *		returnInstance = return newly created ca_editor_ui_bundle_placements instance instead of placement_id
+	 * @return int|ca_editor_ui_bundle_placements Returns placement_id of newly created placement on success (or ca_editor_ui_bundle_placements instance if returnInstance option is set), false on error
 	 */
 	public function addPlacement($ps_bundle_name, $ps_placement_code, $pa_settings, $pn_rank=null, $pa_options=null) {
 		if (!($vn_screen_id = $this->getPrimaryKey())) { return null; }
@@ -315,7 +316,7 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 		
 		// Dependent field visibility config relies on UI config
 		if ($this->getAppConfig()->get('enable_dependent_field_visibility')) { CompositeCache::flush('ca_metadata_elements_available_settings'); }
-		return $t_placement->getPrimaryKey();
+		return caGetOption('returnInstance', $pa_options, false) ? $t_placement : $t_placement->getPrimaryKey();
 	}
 	# ------------------------------------------------------
 	/**
@@ -916,6 +917,7 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 					} else {
 						if (!($t_rel = Datamodel::getInstanceByTableName($bundle, true))) { continue(2); }
 						$va_path = array_keys(Datamodel::getPath($t_instance->tableName(), $bundle));
+						
 						$va_additional_settings = array(
 							'restrict_to_relationship_types' => array(
 								'formatType' => FT_TEXT,
@@ -1121,7 +1123,7 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 									_t('Descending') => 'DESC'
 								),
 								'label' => _t('Initial sort direction'),
-								'description' => _t('Direction of sort, when not in a user-specified order.')
+								'description' => _t('Direction of sort, when sort is specified.')
 							),
 							'disableSorts' => array(
 								'formatType' => FT_TEXT,
@@ -1184,9 +1186,26 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 								'takesLocale' => false,
 								'default' => false,
 								'label' => _t('Show set representation button?'),
+								'showOnSelect' => ['useRepresentationRelationshipType'],
 								'description' => _t('If checked an option to link media from related records to the edited record will be displayed.')
-							)
+							),
+							'useRepresentationRelationshipType' => array(
+								'formatType' => FT_TEXT,
+								'displayType' => DT_SELECT,
+								'useRelationshipTypeList' => $va_path[1],
+								'width' => "475px", 'height' => "75px",
+								'takesLocale' => false,
+								'default' => '',
+								'multiple' => false,
+								'label' => _t('Use relationship type'),
+								'description' => _t('Relationship type to link selected representations with.')
+							),
 						);
+						
+						if($va_path[1] === 'ca_objects_x_object_representations') {
+							unset($va_additional_settings['useRepresentationRelationshipType']);
+							unset($va_additional_settings['showSetRepresentationButton']['showOnSelect']);
+						}
 				
 						if(
 							!($policies = array_merge(
@@ -1530,6 +1549,14 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 										'label' => _t('Number of items to load per page'),
 										'description' => _t('Maximum number of items to render on initial load.')
 									),
+									'itemDisplayTemplate' => [
+										'formatType' => FT_TEXT,
+										'displayType' => DT_FIELD,
+										'default' => '',
+										'width' => "475px", 'height' => "100px",
+										'label' => _t('Item display template'),
+										'description' => _t('Caption for item in hierarchy list.')
+									]
 								];
 								break;
 							case 'authority_references_list':
@@ -2097,11 +2124,78 @@ class ca_editor_ui_screens extends BundlableLabelableBaseModelWithAttributes {
 										'default' => false,
 										'label' => _t('Show batch editing button?'),
 										'description' => _t('If checked an option to batch edit contents will be displayed.')
-									)
+									),
+									'showCount' => array(
+										'formatType' => FT_NUMBER,
+										'displayType' => DT_CHECKBOXES,
+										'width' => 10, 'height' => 1,
+										'takesLocale' => false,
+										'default' => 0,
+										'label' => _t('Show relationship count in header?'),
+										'description' => _t('If checked the number of relationships will be displayed in the header for the field.')
+									),
+									'numPerPage' => array(
+										'formatType' => FT_NUMBER,
+										'displayType' => DT_FIELD,
+										'default' => 100,
+										'width' => "5", 'height' => 1,
+										'label' => _t('Number of items to load per page'),
+										'description' => _t('Maximum number of items to render on initial load.')
+									),
+									'disableSorts' => array(
+										'formatType' => FT_TEXT,
+										'displayType' => DT_CHECKBOXES,
+										'width' => 10, 'height' => 1,
+										'takesLocale' => false,
+										'default' => '0',
+										'label' => _t('Disable user-selectable sorting options?'),
+										'hideOnSelect' => ['allowedSorts'],
+										'description' => _t('If checked sorting of related items will be disabled.')
+									),
+									'sortDirection' => array(
+										'formatType' => FT_TEXT,
+										'displayType' => DT_SELECT,
+										'width' => "200px", 'height' => "1",
+										'takesLocale' => false,
+										'default' => 'ASC',
+										'options' => array(
+											_t('Ascending') => 'ASC',
+											_t('Descending') => 'DESC'
+										),
+										'label' => _t('Initial sort direction'),
+										'description' => _t('Direction of sort, when sort is specified.')
+									),
 								);
+								$policy_tables = ca_objects::getHistoryTrackingCurrentValuePolicyTargets();
+								
+								foreach($policy_tables as $t) {
+									$tl = Datamodel::getTableProperty($t, 'NAME_SINGULAR');
+									$va_additional_settings["sort_{$t}"] = [
+										'formatType' => FT_TEXT,
+										'displayType' => DT_SELECT,
+										'width' => "475px", 'height' => 1,
+										'takesLocale' => false,
+										'default' => '',
+										'label' => _t('Initially sort %1 policies using', $tl),
+										'showSortableBundlesFor' => ['table' => $t],
+										'description' => _t('Default sort for %1 policies.', $tl)
+									];
+								}
+								foreach($policy_tables as $t) {
+									$tl = Datamodel::getTableProperty($t, 'NAME_SINGULAR');
+									$va_additional_settings["allowedSorts_{$t}"] = [
+										'formatType' => FT_TEXT,
+										'displayType' => DT_SELECT,
+										'showSortableBundlesFor' => ['table' => $t],
+										'default' => null,
+										'multiple' => true,
+										'width' => "475px", 'height' => 5,
+										'label' => _t('User-selectable sort options for %1 policies', $tl),
+										'description' => _t('Limits user-selectable sort options on this bundle.')
+									];
+								}
 								break;
 							case 'ca_set_items':
-								require_once(__CA_MODELS_DIR__."/ca_sets.php");
 								$t_set = new ca_sets();
 								if ($this->inTransaction()) { $t_set->setTransaction($this->getTransaction()); }
 								

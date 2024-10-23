@@ -770,14 +770,13 @@ class ca_objects extends RepresentableBaseModel implements IBundleProvider {
 					$va_reps[$qr_res->get('representation_id')] = $qr_res->getRow();
 				}
 				
-				$t_object_x_rep = new ca_objects_x_object_representations();
-				$t_object_x_rep->setTransaction($o_t);
 				foreach($va_reps as $vn_representation_id => $va_rep) {
-					$t_object_x_rep->setMode(ACCESS_WRITE);
 					$va_rep['object_id'] = $t_dupe->getPrimaryKey();
+					
+					$t_object_x_rep = new ca_objects_x_object_representations();
+					$t_object_x_rep->setTransaction($o_t);
 					$t_object_x_rep->set($va_rep);
 					$t_object_x_rep->insert();
-					
 					if ($t_object_x_rep->numErrors()) {
 						$this->errors = $t_object_x_rep->errors;
 						if ($vb_we_set_transaction) { $o_t->rollback();}
@@ -893,7 +892,7 @@ class ca_objects extends RepresentableBaseModel implements IBundleProvider {
 		$va_component_types = $this->getAppConfig()->getList('ca_objects_component_types');
 		
 		if (is_array($va_component_types) && (sizeof($va_component_types) && !in_array('*', $va_component_types))) {
-			$va_ids = ca_objects::find(['parent_id' => $pn_object_id, 'type_id' => $va_component_types], ['returnAs' => 'ids']);
+			$va_ids = ca_objects::find(['parent_id' => $pn_object_id, 'type_id' => ['IN', $va_component_types]], ['returnAs' => 'ids']);
 		} else {
 			$va_ids = ca_objects::find(['parent_id' => $pn_object_id], ['returnAs' => 'ids']);
 		}
