@@ -110,6 +110,12 @@ class SearchController extends \GraphQLServices\GraphQLServiceController {
 							'defaultValue' => null
 						],
 						[
+							'name' => 'latestCount',
+							'type' => Type::int(),
+							'description' => _t('Maximum number of records to return'),
+							'defaultValue' => null
+						],
+						[
 							'name' => 'restrictToTypes',
 							'type' => Type::listOf(Type::string()),
 							'description' => _t('Type restrictions')
@@ -191,7 +197,8 @@ class SearchController extends \GraphQLServices\GraphQLServiceController {
 						
 							$bundles = \GraphQLServices\Helpers\extractBundleNames($rec, $t, []);
 
-							$results[] = ['name' => $name, 'result' => $r = \GraphQLServices\Helpers\fetchDataForBundles($qr, $bundles, ['checkAccess' => $check_access, 'start' => $t['start'], 'limit' => $t['limit'], 'filterByAncestors' => $t['filterByAncestors'], 'filterNonPrimaryRepresentations' => $t['filterNonPrimaryRepresentations']]), 'count' => $qr->numHits()];
+							$results[] = ['name' => $name, 'result' => $r = \GraphQLServices\Helpers\fetchDataForBundles($qr, $bundles, ['checkAccess' => $check_access, 'start' => $t['start'], 'limit' => $t['limit'], 'filterByAncestors' => $t['filterByAncestors'], 'filterNonPrimaryRepresentations' => $t['filterNonPrimaryRepresentations']],$args['latestCount']), 'count' => $qr->numHits()];
+
 							if(is_null($ftable)) {
 								// Stash details of first search for use in "flat" response
 								$ftable = $table;

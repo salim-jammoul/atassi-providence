@@ -79,7 +79,7 @@ function extractBundleNames($rec, array $args) : array {
  *
  * @return array
  */
-function fetchDataForBundles($sresult, array $bundles, array $options=null) : array {
+function fetchDataForBundles($sresult, array $bundles, array $options=null,$latestCount=0) : array {
 	$start = caGetOption('start', $options, 0, ['castTo' => 'int']);
 	$limit = caGetOption('limit', $options, null, ['castTo' => 'int']);
 	
@@ -102,10 +102,12 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 		
 		$rec = \Datamodel::getInstance($table, true);
 		$result_count = $sresult->numHits();
-		
-		if(($start > 0) && ($start < $result_count)) {
+		if($latestCount > 0) {
+			$sresult->seek($result_count - $latestCount);
+		}
+		elseif(($start > 0) && ($start < $result_count)) {
 			$sresult->seek($start);
-		} elseif(($start !== 0) && (($start >= $result_count) || ($start < 0))) {
+		}elseif(($start !== 0) && (($start >= $result_count) || ($start < 0))) {
 			// out of bounds; return empty set
 			return [];
 		}
@@ -152,14 +154,16 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 				if(!$is_template && (!is_array($d) || (sizeof($d) === 0))) { continue; }
 		
 				if($is_template) {
+					$subParts = explode(':', $f, 2);
 					$row[] = [
-							'name' => $f, 
+
+							'name' => $subParts[0], 
 							'code' => $use_code ? $use_code : $f,
 							'locale' => null,
 							'dataType' => "Text",
 							'values' => [
 								[
-									'value' => $sresult->getWithTemplate($f, array_merge($pt['options'] ?? [], ['checkAccess' => $check_access, 'primaryIDs' => caGetOption('primaryIDs', $options, null)])),
+									'value' => $sresult->getWithTemplate($subParts[1], array_merge($pt['options'] ?? [], ['checkAccess' => $check_access, 'primaryIDs' => caGetOption('primaryIDs', $options, null)])),
 									'locale' => null,
 									'subvalues' => null,
 									'id' => null,
@@ -214,6 +218,7 @@ function fetchDataForBundles($sresult, array $bundles, array $options=null) : ar
 								}
 							}
 							if($is_set) {
+								$pt['options']['locale'] = $locale;
 								$values[] = [
 									'locale' => $locale,
 									'value' => $sresult->get($f, array_merge(['convertCodesToIdno' => true, 'checkAccess' => $check_access], $pt['options'])),
